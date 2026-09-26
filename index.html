@@ -16,13 +16,20 @@
   }
   canvas { display: block; }
   #hud {
-    position: fixed; left: 0; right: 0; top: calc(env(safe-area-inset-top) + 12px);
-    display: flex; justify-content: space-between; align-items: baseline;
-    padding: 0 18px; pointer-events: none; font-weight: 800;
-    text-shadow: 0 0 10px rgba(60, 255, 120, .8);
+    position: fixed; left: 0; right: 0; top: calc(env(safe-area-inset-top) + 10px);
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 14px; pointer-events: none; font-weight: 800;
+    text-shadow: 0 0 10px rgba(60, 255, 120, .8); z-index: 2;
   }
   #score { font-size: 34px; }
+  #right { display: flex; align-items: center; gap: 10px; }
   #best { font-size: 16px; opacity: .75; }
+  .icon {
+    pointer-events: auto; width: 44px; height: 44px; border-radius: 12px;
+    border: 1px solid rgba(90, 255, 140, .45); background: rgba(0, 20, 8, .55);
+    color: #9dffb4; font-size: 22px; line-height: 1; cursor: pointer; padding: 0;
+  }
+  .icon.off { opacity: .4; }
   .zone {
     position: fixed; bottom: 0; width: 50%; height: 30%;
     display: flex; align-items: flex-end; justify-content: center; box-sizing: border-box;
@@ -36,7 +43,7 @@
   #overlay {
     position: fixed; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; text-align: center;
-    background: rgba(0, 0, 0, .55); pointer-events: none;
+    background: rgba(0, 0, 0, .55); pointer-events: none; z-index: 1;
   }
   #overlay h1 {
     margin: 0 0 14px; font-size: 52px; letter-spacing: 6px; color: #7dff9c;
@@ -44,17 +51,53 @@
   }
   #overlay p { margin: 6px 16px; font-size: 20px; }
   #overlay .hint { opacity: .7; font-size: 15px; }
+  #panel {
+    position: fixed; z-index: 3; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(440px, calc(100vw - 24px)); max-height: calc(100% - 40px); overflow-y: auto;
+    -webkit-overflow-scrolling: touch; touch-action: pan-y; box-sizing: border-box;
+    padding: 16px 18px; border-radius: 16px; background: rgba(2, 16, 7, .94);
+    border: 1px solid rgba(90, 255, 140, .5); box-shadow: 0 0 30px rgba(40, 255, 110, .25);
+    -webkit-user-select: none; user-select: none;
+  }
+  #panel h2 { margin: 0 0 6px; font-size: 22px; color: #7dff9c; letter-spacing: 2px; }
+  #panel h3 { margin: 14px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; opacity: .6; }
+  .row { margin: 10px 0 4px; }
+  .row .top { display: flex; justify-content: space-between; font-size: 15px; font-weight: 600; }
+  .row .val { color: #7dff9c; font-variant-numeric: tabular-nums; }
+  .row .desc { font-size: 12px; opacity: .6; margin-top: 1px; }
+  .row input { width: 100%; margin: 6px 0 0; accent-color: #39ff6a; height: 28px; }
+  .btns { display: flex; gap: 10px; margin-top: 16px; position: sticky; bottom: -16px; padding: 10px 0 4px; background: rgba(2, 16, 7, .96); }
+  .btns button {
+    flex: 1; height: 44px; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(90, 255, 140, .5); background: rgba(20, 60, 30, .6); color: #c8ffd4;
+  }
+  .btns button.primary { background: #1f9a45; color: #02140a; border-color: #39ff6a; }
   .hidden { display: none !important; }
 </style>
 </head>
 <body>
-<div id="hud"><div id="score">0</div><div id="best">Рекорд: 0</div></div>
+<div id="hud">
+  <div id="score">0</div>
+  <div id="right">
+    <div id="best">Рекорд: 0</div>
+    <button class="icon ui" id="mute" title="Звук">♪</button>
+    <button class="icon ui" id="gear" title="Настройки">⚙</button>
+  </div>
+</div>
 <div class="zone" id="zl">◀</div>
 <div class="zone" id="zr">▶</div>
 <div id="overlay">
   <h1 id="title">SLOPE RUN</h1>
   <p id="msg">Нажми, чтобы начать</p>
-  <p class="hint" id="hint">Левая / правая половина экрана — поворот. На компьютере: ← → или A / D</p>
+  <p class="hint" id="hint">Левая / правая половина экрана — поворот. На компьютере: ← → или A / D, Esc — настройки</p>
+</div>
+<div id="panel" class="ui hidden">
+  <h2>НАСТРОЙКИ</h2>
+  <div id="rows"></div>
+  <div class="btns">
+    <button id="reset">Сбросить</button>
+    <button id="done" class="primary">Готово</button>
+  </div>
 </div>
 
 <script type="importmap">
@@ -63,29 +106,284 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ---------------- Tunable constants ----------------
+// ---------------- Fixed (internal) constants ----------------
 const CFG = {
   ballRadius: 0.5,
-  gravity: 32,
-  startSpeed: 14,       // forward speed at start (units/s, 1 unit = 1 m)
-  maxSpeed: 46,
-  accel: 0.45,          // forward speed gain per second
-  steerBase: 9,         // max lateral speed at start
-  steerPerSpeed: 0.12,  // extra lateral speed per unit of forward speed
-  steerAccel: 45,       // how fast lateral speed reaches its target
-  airControl: 0.55,     // steering multiplier while airborne
+  steerSpeedGain: 0.013, // steering force grows with forward speed: F * (1 + speed * gain)
+  airDragFactor: 0.08,   // lateral drag in the air relative to grip on the ground
   slabThickness: 1.2,
-  viewAhead: 260,       // how far ahead the track is generated
-  keepBehind: 40,       // how far behind the track is kept before disposal
-  stepTolerance: 0.35,  // how deep the ball may sink before it counts as hitting a wall
-  fallLimit: 14,        // game over when this far below the last ground height
+  viewAhead: 260,        // how far ahead the track is generated
+  keepBehind: 40,        // how far behind the track is kept before disposal
+  stepTolerance: 0.35,   // how deep the ball may sink before it counts as hitting a wall
+  fallLimit: 14,         // game over when this far below the last ground height
   fixedDt: 1 / 120,
 };
 
+// ---------------- User-tunable settings ----------------
+const SETTINGS = [
+  { group: 'Шарик' },
+  { key: 'mass', label: 'Масса', min: 0.3, max: 5, step: 0.1, def: 1.2,
+    desc: 'Инерция: тяжёлый шарик медленнее разгоняется вбок и дольше скользит' },
+  { key: 'steerForce', label: 'Сила поворота', min: 10, max: 120, step: 1, def: 40,
+    desc: 'Насколько сильно кнопки толкают шарик вбок' },
+  { key: 'grip', label: 'Сцепление', min: 0.5, max: 12, step: 0.1, def: 4,
+    desc: 'Боковое трение: мало — «лёд», много — шарик сразу останавливается' },
+  { key: 'airControl', label: 'Управление в воздухе', min: 0, max: 1, step: 0.05, def: 0.5,
+    desc: 'Доля силы поворота во время прыжка' },
+  { group: 'Скорость и мир' },
+  { key: 'startSpeed', label: 'Стартовая скорость', min: 6, max: 30, step: 1, def: 14, unit: ' м/с' },
+  { key: 'maxSpeed', label: 'Максимальная скорость', min: 15, max: 80, step: 1, def: 46, unit: ' м/с' },
+  { key: 'accel', label: 'Ускорение', min: 0, max: 2, step: 0.05, def: 0.45, unit: ' м/с²',
+    desc: 'Насколько быстро растёт скорость вперёд' },
+  { key: 'gravity', label: 'Гравитация', min: 10, max: 60, step: 1, def: 32, unit: ' м/с²',
+    desc: 'Меньше — дольше полёт на трамплинах' },
+  { group: 'Звук' },
+  { key: 'musicVol', label: 'Музыка', min: 0, max: 1, step: 0.05, def: 0.5, pct: true },
+  { key: 'sfxVol', label: 'Эффекты', min: 0, max: 1, step: 0.05, def: 0.7, pct: true },
+];
+const DEFAULTS = Object.fromEntries(SETTINGS.filter((s) => s.key).map((s) => [s.key, s.def]));
+const P = { ...DEFAULTS, ...loadJSON('slopeSettings', {}) };
+let muted = !!loadJSON('slopeMuted', false);
+
+function loadJSON(k, fallback) {
+  try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
+}
+function saveJSON(k, v) {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ }
+}
+
 const rand = (a, b) => a + Math.random() * (b - a);
 const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+const speedT = (v) => clamp((v - P.startSpeed) / Math.max(1, P.maxSpeed - P.startSpeed), 0, 1);
+
+// ---------------- 8-bit audio: procedural music + SFX ----------------
+class Chiptune {
+  constructor() {
+    this.ctx = null;
+    this.playing = false;
+    this.tempo = 132;
+  }
+
+  // Must be called from a user gesture (iOS unlock)
+  ensure() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    if (!this.ctx) {
+      const ctx = this.ctx = new AC();
+      this.master = ctx.createGain();
+      this.master.connect(ctx.destination);
+      this.music = ctx.createGain();
+      this.sfx = ctx.createGain();
+      this.music.connect(this.master);
+      this.sfx.connect(this.master);
+      this.pulse125 = this.pulseWave(0.125);
+      this.pulse25 = this.pulseWave(0.25);
+      this.pulse50 = this.pulseWave(0.5);
+      // One second of white noise shared by drums and SFX
+      this.noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      this.applyVolumes();
+    }
+    if (this.ctx.state !== 'running') this.ctx.resume();
+    return true;
+  }
+
+  applyVolumes() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.setTargetAtTime(muted ? 0 : 1, t, 0.02);
+    this.music.gain.setTargetAtTime(P.musicVol, t, 0.02);
+    this.sfx.gain.setTargetAtTime(P.sfxVol, t, 0.02);
+  }
+
+  // NES-style pulse wave with the given duty cycle
+  pulseWave(duty) {
+    const n = 48;
+    const real = new Float32Array(n), imag = new Float32Array(n);
+    for (let i = 1; i < n; i++) real[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * duty);
+    return this.ctx.createPeriodicWave(real, imag);
+  }
+
+  static freq(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
+
+  tone(wave, midi, t, dur, vol, dest = this.music, slideTo = null) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    if (typeof wave === 'string') osc.type = wave; else osc.setPeriodicWave(wave);
+    osc.frequency.setValueAtTime(Chiptune.freq(midi), t);
+    if (slideTo !== null) osc.frequency.exponentialRampToValueAtTime(Chiptune.freq(slideTo), t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.004);
+    g.gain.linearRampToValueAtTime(vol * 0.7, t + dur * 0.6);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(g).connect(dest);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  noise(t, dur, vol, type, freq, dest = this.music, freqEnd = null) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== null) f.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + dur + 0.02);
+  }
+
+  kick(t, vol) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(160, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    osc.connect(g).connect(this.music);
+    osc.start(t);
+    osc.stop(t + 0.18);
+  }
+
+  // ----- Song generation -----
+  static SCALE = [0, 2, 3, 5, 7, 8, 10]; // natural minor
+  static PROGRESSIONS = [[0, 5, 2, 6], [0, 3, 4, 0], [0, 6, 5, 6], [0, 5, 3, 4], [0, 3, 5, 4], [0, 2, 5, 6]];
+  static BASS = [
+    [0, null, 0, null, 12, null, 0, null, 0, null, 0, null, 12, null, 7, null],
+    [0, null, 12, null, 0, null, 12, null, 0, null, 12, null, 0, null, 12, 7],
+    [0, null, null, 0, null, null, 0, null, 0, null, null, 0, null, null, 7, null],
+    [0, 0, 12, 0, 0, 0, 12, 0, 0, 0, 12, 0, 7, 0, 12, 0],
+  ];
+  static KICKS = [[0, 8], [0, 6, 8], [0, 8, 10], [0, 3, 8, 11]];
+
+  static semi(deg) {
+    const o = Math.floor(deg / 7);
+    return 12 * o + Chiptune.SCALE[((deg % 7) + 7) % 7];
+  }
+
+  newSong(changeKey = true) {
+    if (changeKey || this.root === undefined) this.root = pick([40, 41, 43, 45, 46]); // E2..A#2
+    this.prog = pick(Chiptune.PROGRESSIONS);
+    this.bassPat = pick(Chiptune.BASS);
+    this.kickPat = pick(Chiptune.KICKS);
+    this.arpUpDown = Math.random() < 0.5;
+    this.leadWave = pick([this.pulse50, this.pulse25]);
+    this.phraseA = this.genMelody(0, 64);
+    this.phraseB = this.phraseA.slice(0, 48).concat(this.genMelody(48, 64));
+  }
+
+  // Random walk over the scale, snapping to chord tones on strong beats
+  genMelody(from, to) {
+    const out = [];
+    let deg = 7 + this.prog[Math.floor(from / 16)];
+    for (let s = from; s < to; s++) {
+      const pos = s & 15;
+      const chord = this.prog[s >> 4];
+      const p = pos % 4 === 0 ? 0.65 : pos % 2 === 0 ? 0.3 : 0.1;
+      if (s !== from && Math.random() > p) { out.push(null); continue; }
+      if (pos % 4 === 0) {
+        const tones = [];
+        for (let o = 0; o <= 14; o += 7) for (const k of [0, 2, 4]) tones.push(chord + k + o);
+        tones.sort((a, b) => Math.abs(a - deg) - Math.abs(b - deg));
+        deg = tones[Math.random() < 0.7 ? 0 : 1];
+      } else {
+        deg += pick([-2, -1, -1, 1, 1, 2]);
+      }
+      deg = clamp(deg, 2, 14);
+      out.push(deg);
+    }
+    return out;
+  }
+
+  start(fresh = true) {
+    if (!this.ensure() || this.playing) return;
+    this.playing = true;
+    if (fresh || !this.prog) { this.newSong(); this.step = 0; }
+    this.nextTime = this.ctx.currentTime + 0.06;
+    this.timer = setInterval(() => this.schedule(), 25);
+  }
+
+  stop() {
+    this.playing = false;
+    clearInterval(this.timer);
+  }
+
+  schedule() {
+    if (!this.playing) return;
+    const stepDur = 60 / this.tempo / 4;
+    while (this.nextTime < this.ctx.currentTime + 0.12) {
+      this.playStep(this.step, this.nextTime, stepDur);
+      this.nextTime += stepDur;
+      this.step++;
+    }
+  }
+
+  playStep(step, t, sd) {
+    const bar = Math.floor(step / 16);
+    const pos = step & 15;
+    const cycleBar = bar % 16;          // 16-bar song cycle
+    const section = cycleBar >> 2;      // four 4-bar phrases
+    if (pos === 0 && cycleBar === 0 && bar > 0) this.newSong(Math.random() < 0.5);
+
+    const chordDeg = this.prog[bar & 3];
+    const chordRoot = this.root + Chiptune.semi(chordDeg);
+    const intensity = this.tempo > 150 ? 1 : 0;
+
+    // Bass (triangle)
+    const b = this.bassPat[pos];
+    if (b !== null) {
+      const long = this.bassPat[(pos + 1) & 15] === null;
+      this.tone('triangle', chordRoot + b, t, sd * (long ? 1.8 : 0.9), 0.22);
+    }
+
+    // Arpeggio (thin pulse), chord tones one octave up
+    const tones = [0, 2, 4, 7].map((k) => this.root + 12 + Chiptune.semi(chordDeg + k));
+    const seq = this.arpUpDown ? [0, 1, 2, 3, 2, 1] : [0, 1, 2, 3];
+    this.tone(this.pulse125, tones[seq[step % seq.length]], t, sd * 0.8, 0.045);
+
+    // Lead melody enters after the first 4-bar intro
+    if (bar >= 4) {
+      const phrase = section % 2 === 1 ? this.phraseB : this.phraseA;
+      const i = (cycleBar & 3) * 16 + pos;
+      const deg = phrase[i];
+      if (deg !== null) {
+        let len = 1;
+        while (len < 6 && i + len < 64 && phrase[i + len] === null) len++;
+        this.tone(this.leadWave, this.root + 24 + Chiptune.semi(deg), t, sd * len * 0.9, 0.09);
+      }
+    }
+
+    // Drums
+    if (this.kickPat.includes(pos)) this.kick(t, 0.55);
+    const fill = (cycleBar & 3) === 3 && pos >= 12;
+    if (pos === 4 || pos === 12 || fill) this.noise(t, 0.12, 0.25, 'bandpass', 1800);
+    if (pos % 2 === 0 || intensity) this.noise(t, 0.03, pos % 4 === 2 ? 0.1 : 0.05, 'highpass', 7000);
+  }
+
+  // ----- Sound effects -----
+  sfxJump() { if (this.ctx) this.tone(this.pulse25, 62, this.ctx.currentTime, 0.18, 0.18, this.sfx, 86); }
+  sfxLand() { if (this.ctx) this.noise(this.ctx.currentTime, 0.09, 0.3, 'lowpass', 600, this.sfx); }
+  sfxCrash() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.noise(t, 0.6, 0.6, 'lowpass', 4000, this.sfx, 150);
+    this.tone(this.pulse50, 50, t, 0.4, 0.2, this.sfx, 26);
+  }
+  sfxFall() { if (this.ctx) this.tone(this.pulse50, 84, this.ctx.currentTime, 0.9, 0.16, this.sfx, 36); }
+}
+
+const audio = new Chiptune();
 
 // ---------------- Renderer & scene ----------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -207,7 +505,7 @@ class Track {
       if (s >= seg.s1) continue;
       const t = (s - seg.s0) / (seg.s1 - seg.s0);
       if (Math.abs(x - lerp(seg.x0, seg.x1, t)) > seg.w / 2) return null;
-      return { y: lerp(seg.y0, seg.y1, t), slope: (seg.y1 - seg.y0) / (seg.s1 - seg.s0) };
+      return { y: lerp(seg.y0, seg.y1, t), slope: (seg.y1 - seg.y0) / (seg.s1 - seg.s0), kind: seg.kind };
     }
     return null;
   }
@@ -216,7 +514,7 @@ class Track {
     while (this.s < ballS + CFG.viewAhead) {
       // Estimate the speed the ball will have when it reaches the new chunk
       const ahead = Math.max(0, this.s - ballS);
-      const est = Math.min(CFG.maxSpeed, speed + CFG.accel * ahead / Math.max(speed, 1));
+      const est = Math.min(P.maxSpeed, speed + P.accel * ahead / Math.max(speed, 1));
       this.generateChunk(est);
     }
     while (this.segments.length && this.segments[0].s1 < ballS - CFG.keepBehind) this.dispose(this.segments.shift());
@@ -290,7 +588,7 @@ class Track {
     // Ballistic estimate of the jump distance to keep the gap passable
     const drop = rand(1.5, 3.5);
     const vy = k * speed;
-    const tFlight = (vy + Math.sqrt(vy * vy + 2 * CFG.gravity * drop)) / CFG.gravity;
+    const tFlight = (vy + Math.sqrt(vy * vy + 2 * P.gravity * drop)) / P.gravity;
     const flight = speed * tFlight;
     const gap = Math.min(clamp(speed * 0.3 * (0.85 + 0.3 * diff), 4, 15), flight * 0.6);
     this.addGap(gap, drop);
@@ -310,22 +608,19 @@ scene.add(ballMesh);
 const glow = new THREE.PointLight(0x55ff88, 18, 14, 2);
 scene.add(glow);
 
-const ball = { s: 0, x: 0, y: 0, vx: 0, vy: 0, grounded: true };
-const state = { mode: 'menu', speed: CFG.startSpeed, lastGroundY: 0, overAt: 0, best: loadBest() };
+const ball = { s: 0, x: 0, y: 0, vx: 0, vy: 0, grounded: true, airTime: 0, lastKind: 'floor' };
+const state = { mode: 'menu', speed: P.startSpeed, lastGroundY: 0, overAt: 0, best: loadJSON('slopeBest', 0) | 0 };
 const cam = { x: 0, y: 0 };
 const rollAxis = new THREE.Vector3();
 
 // ---------------- UI ----------------
 const $ = (id) => document.getElementById(id);
-const ui = { score: $('score'), best: $('best'), overlay: $('overlay'), title: $('title'), msg: $('msg'), hint: $('hint'), zl: $('zl'), zr: $('zr') };
+const ui = {
+  score: $('score'), best: $('best'), overlay: $('overlay'), title: $('title'), msg: $('msg'), hint: $('hint'),
+  zl: $('zl'), zr: $('zr'), panel: $('panel'), rows: $('rows'), gear: $('gear'), mute: $('mute'),
+};
 ui.best.textContent = 'Рекорд: ' + state.best;
 
-function loadBest() {
-  try { return parseInt(localStorage.getItem('slopeBest') || '0', 10) || 0; } catch { return 0; }
-}
-function saveBest(v) {
-  try { localStorage.setItem('slopeBest', String(v)); } catch { /* storage unavailable */ }
-}
 function showOverlay(title, msg, hint = '') {
   ui.title.textContent = title;
   ui.msg.textContent = msg;
@@ -333,9 +628,87 @@ function showOverlay(title, msg, hint = '') {
   ui.overlay.classList.remove('hidden');
 }
 
+// ---------------- Settings panel ----------------
+const fmt = (s, v) => s.pct ? Math.round(v * 100) + '%' : (s.step < 1 ? (+v).toFixed(s.step < 0.1 ? 2 : 1) : String(v)) + (s.unit || '');
+const inputs = {};
+
+function buildSettings() {
+  for (const s of SETTINGS) {
+    if (s.group) {
+      const h = document.createElement('h3');
+      h.textContent = s.group;
+      ui.rows.appendChild(h);
+      continue;
+    }
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<div class="top"><span></span><span class="val"></span></div>` +
+      (s.desc ? `<div class="desc"></div>` : '') +
+      `<input type="range" min="${s.min}" max="${s.max}" step="${s.step}">`;
+    row.querySelector('.top span').textContent = s.label;
+    if (s.desc) row.querySelector('.desc').textContent = s.desc;
+    const input = row.querySelector('input');
+    const val = row.querySelector('.val');
+    input.value = P[s.key];
+    val.textContent = fmt(s, P[s.key]);
+    input.addEventListener('input', () => {
+      P[s.key] = parseFloat(input.value);
+      val.textContent = fmt(s, P[s.key]);
+      saveJSON('slopeSettings', P);
+      audio.applyVolumes();
+    });
+    inputs[s.key] = { input, val, s };
+    ui.rows.appendChild(row);
+  }
+}
+buildSettings();
+
+function syncSettingsUI() {
+  for (const { input, val, s } of Object.values(inputs)) {
+    input.value = P[s.key];
+    val.textContent = fmt(s, P[s.key]);
+  }
+}
+
+function openSettings() {
+  if (state.settingsOpen) return;
+  state.settingsOpen = true;
+  if (state.mode === 'play') { state.mode = 'paused'; audio.stop(); }
+  pointers.clear();
+  ui.overlay.classList.add('hidden');
+  ui.panel.classList.remove('hidden');
+}
+
+function closeSettings() {
+  state.settingsOpen = false;
+  ui.panel.classList.add('hidden');
+  if (state.mode === 'paused') showOverlay('ПАУЗА', 'Нажми, чтобы продолжить');
+  else ui.overlay.classList.remove('hidden');
+}
+
+ui.gear.addEventListener('click', () => (state.settingsOpen ? closeSettings() : openSettings()));
+$('done').addEventListener('click', closeSettings);
+$('reset').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  saveJSON('slopeSettings', P);
+  syncSettingsUI();
+  audio.applyVolumes();
+});
+
+function updateMuteIcon() { ui.mute.classList.toggle('off', muted); }
+updateMuteIcon();
+ui.mute.addEventListener('click', () => {
+  muted = !muted;
+  saveJSON('slopeMuted', muted);
+  audio.ensure();
+  audio.applyVolumes();
+  updateMuteIcon();
+});
+
 // ---------------- Input ----------------
 const pointers = new Map(); // pointerId -> -1 (left) or +1 (right)
 const keys = { left: false, right: false };
+const isUi = (e) => !!(e.target && e.target.closest && e.target.closest('.ui'));
 
 function steerInput() {
   let l = keys.left, r = keys.right;
@@ -346,13 +719,16 @@ function steerInput() {
 }
 
 function onTap() {
+  if (state.settingsOpen) return;
   if (state.mode === 'menu') startGame();
   else if (state.mode === 'paused') resumeGame();
   else if (state.mode === 'over' && performance.now() - state.overAt > 700) startGame();
 }
 
 window.addEventListener('pointerdown', (e) => {
+  if (isUi(e)) return;
   e.preventDefault();
+  audio.ensure(); // unlock audio inside a user gesture
   if (state.mode !== 'play') { onTap(); return; }
   pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? -1 : 1);
 }, { passive: false });
@@ -362,14 +738,17 @@ window.addEventListener('pointermove', (e) => {
 const releasePointer = (e) => pointers.delete(e.pointerId);
 window.addEventListener('pointerup', releasePointer);
 window.addEventListener('pointercancel', releasePointer);
-// Block iOS scrolling / zoom gestures
-document.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+// Block iOS scrolling / zoom gestures everywhere except the settings UI
+document.addEventListener('touchstart', (e) => { if (!isUi(e)) e.preventDefault(); }, { passive: false });
+document.addEventListener('touchmove', (e) => { if (!isUi(e)) e.preventDefault(); }, { passive: false });
+// iOS sometimes only unlocks audio on touchend
+document.addEventListener('touchend', () => audio.ensure(), { passive: true });
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
   if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-  if (e.code === 'Space' || e.code === 'Enter') onTap();
+  if (e.code === 'Escape') state.settingsOpen ? closeSettings() : openSettings();
+  if ((e.code === 'Space' || e.code === 'Enter') && !state.settingsOpen) { audio.ensure(); onTap(); }
 });
 window.addEventListener('keyup', (e) => {
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
@@ -379,8 +758,9 @@ window.addEventListener('keyup', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && state.mode === 'play') {
     state.mode = 'paused';
+    audio.stop();
     pointers.clear();
-    showOverlay('ПАУЗА', 'Нажми, чтобы продолжить');
+    if (!state.settingsOpen) showOverlay('ПАУЗА', 'Нажми, чтобы продолжить');
   }
 });
 
@@ -393,9 +773,9 @@ window.addEventListener('resize', () => {
 // ---------------- Game flow ----------------
 function startGame() {
   track.reset();
-  Object.assign(ball, { s: 4, x: 0, vx: 0, vy: 0, grounded: true });
+  Object.assign(ball, { s: 4, x: 0, vx: 0, vy: 0, grounded: true, airTime: 0, lastKind: 'floor' });
   ball.y = track.surfaceAt(ball.s, 0).y + CFG.ballRadius;
-  state.speed = CFG.startSpeed;
+  state.speed = P.startSpeed;
   state.lastGroundY = ball.y;
   state.mode = 'play';
   cam.x = ball.x; cam.y = ball.y;
@@ -405,20 +785,25 @@ function startGame() {
   pointers.clear();
   ui.overlay.classList.add('hidden');
   track.update(ball.s, state.speed);
+  audio.stop();
+  audio.start(true);
 }
 
 function resumeGame() {
   state.mode = 'play';
   ui.overlay.classList.add('hidden');
+  audio.start(false);
 }
 
 function gameOver(reason) {
   state.mode = 'over';
   state.overAt = performance.now();
   pointers.clear();
+  audio.stop();
+  if (reason === 'crash') audio.sfxCrash(); else audio.sfxFall();
   const score = Math.floor(ball.s);
   const record = score > state.best;
-  if (record) { state.best = score; saveBest(score); ui.best.textContent = 'Рекорд: ' + score; }
+  if (record) { state.best = score; saveJSON('slopeBest', score); ui.best.textContent = 'Рекорд: ' + score; }
   if (reason === 'crash') { ballMat.color.set(0xff4466); ballMat.emissive.set(0x6a0718); }
   showOverlay(reason === 'crash' ? 'РАЗБИЛСЯ!' : 'УПАЛ!',
     `${score} м${record ? ' — новый рекорд!' : ''}`,
@@ -428,17 +813,19 @@ function gameOver(reason) {
 // ---------------- Physics (fixed step) ----------------
 function step(dt) {
   const r = CFG.ballRadius;
-  state.speed = Math.min(CFG.maxSpeed, state.speed + CFG.accel * dt);
+  state.speed = clamp(state.speed + P.accel * dt, 0, Math.max(P.maxSpeed, P.startSpeed));
 
-  // Lateral steering
-  const steerMax = CFG.steerBase + state.speed * CFG.steerPerSpeed;
-  const control = ball.grounded ? 1 : CFG.airControl;
-  const maxDv = CFG.steerAccel * control * dt;
-  ball.vx += clamp(steerInput() * steerMax - ball.vx, -maxDv, maxDv);
+  // Lateral motion with inertia: m * dvx/dt = F_steer - grip * vx
+  const sf = 1 + state.speed * CFG.steerSpeedGain;
+  const force = steerInput() * P.steerForce * sf * (ball.grounded ? 1 : P.airControl);
+  const drag = (ball.grounded ? P.grip : P.grip * CFG.airDragFactor) * ball.vx;
+  ball.vx += (force - drag) / P.mass * dt;
+  const vxMax = Math.min(40, 1.5 * P.steerForce * sf / P.grip);
+  ball.vx = clamp(ball.vx, -vxMax, vxMax);
 
   ball.s += state.speed * dt;
   ball.x += ball.vx * dt;
-  ball.vy -= CFG.gravity * dt;
+  ball.vy -= P.gravity * dt;
   ball.y += ball.vy * dt;
 
   // Ground contact
@@ -453,11 +840,15 @@ function step(dt) {
       ball.vy = surf.slope * state.speed; // keeps momentum, so ramps launch the ball
       grounded = true;
       state.lastGroundY = surf.y;
+      if (!ball.grounded && ball.airTime > 0.3) audio.sfxLand();
+      ball.lastKind = surf.kind;
     } else if (diff < -sinkTol && diff > -(CFG.slabThickness + 2 * r)) {
       gameOver('crash'); // hit the front face of a higher slab
       return;
     }
   }
+  if (ball.grounded && !grounded && ball.lastKind === 'ramp') audio.sfxJump();
+  ball.airTime = grounded ? 0 : ball.airTime + dt;
   ball.grounded = grounded;
 
   // Obstacles
@@ -496,8 +887,7 @@ function updateVisuals(dt) {
   camera.position.set(cam.x, cam.y + 3.4, -ball.s + 7.5);
   camera.lookAt(cam.x, cam.y + 0.4, -ball.s - 12);
   camera.rotateZ(-ball.vx * 0.008);
-  const speedT = (state.speed - CFG.startSpeed) / (CFG.maxSpeed - CFG.startSpeed);
-  const fov = 62 + speedT * 16;
+  const fov = 62 + speedT(state.speed) * 16;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
 
   grid.position.set(Math.round(ball.x / 10) * 10, state.lastGroundY - 45, -Math.round(ball.s / 10) * 10);
@@ -527,6 +917,7 @@ function frame(now) {
       if (state.mode !== 'play') { acc = 0; break; }
     }
     track.update(ball.s, state.speed);
+    audio.tempo = 132 + speedT(state.speed) * 38; // music speeds up with the ball
   } else {
     steerInput(); // refresh zone highlighting
   }
@@ -538,7 +929,7 @@ function frame(now) {
 // Show the track behind the start menu
 track.reset();
 ball.y = CFG.ballRadius;
-track.update(0, CFG.startSpeed);
+track.update(0, P.startSpeed);
 requestAnimationFrame(frame);
 </script>
 </body>
